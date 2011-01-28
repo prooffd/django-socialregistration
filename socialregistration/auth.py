@@ -4,6 +4,10 @@ from django.contrib.sites.models import Site
 from socialregistration.models import (FacebookProfile, TwitterProfile, OpenIDProfile)
 
 class Auth(object):
+
+    supports_anonymous_user = False
+    supports_object_permissions = False
+
     def get_user(self, user_id):
         try:
             return User.objects.get(pk=user_id)
