@@ -4,6 +4,7 @@ from django.utils.translation import gettext as _
 from django.contrib.auth.models import User
 
 class UserForm(forms.Form):
+
     username = forms.RegexField(r'^\w+$', max_length=32)
     email = forms.EmailField(required=False)
 
@@ -11,6 +12,10 @@ class UserForm(forms.Form):
         super(UserForm, self).__init__(*args, **kwargs)
         self.user = user
         self.profile = profile
+
+        if self.user.email:
+            del self.fields['email']
+
 
     def clean_username(self):
         username = self.cleaned_data.get('username')
@@ -23,7 +28,8 @@ class UserForm(forms.Form):
 
     def save(self, request=None):
         self.user.username = self.cleaned_data.get('username')
-        self.user.email = self.cleaned_data.get('email')
+        if not self.user.email:
+            self.user.email = self.cleaned_data.get('email')
         self.user.save()
         self.profile.user = self.user
         self.profile.save()
