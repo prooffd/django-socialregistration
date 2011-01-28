@@ -7,7 +7,7 @@ Inspired by:
     http://github.com/leah/python-oauth/blob/master/oauth/example/client.py
     http://github.com/facebook/tornado/blob/master/tornado/auth.py
 """
-import time
+
 import base64
 import urllib
 import urllib2
@@ -19,11 +19,9 @@ try:
 except ImportError:
     from cgi import parse_qsl
 
-from xml.dom import minidom
 
 import oauth2 as oauth
 from openid.consumer import consumer as openid
-from openid.consumer.discover import DiscoveryFailure
 from openid.store.interface import OpenIDStore as OIDStore
 from openid.association import Association as OIDAssociation
 
@@ -38,7 +36,7 @@ from django.contrib.sites.models import Site
 
 
 from socialregistration.models import OpenIDStore as OpenIDStoreModel, OpenIDNonce
-from urlparse import urlparse
+
 
 USE_HTTPS = bool(getattr(settings, 'SOCIALREGISTRATION_USE_HTTPS', False))
 
@@ -52,7 +50,7 @@ class OpenIDStore(OIDStore):
     max_nonce_age = 6 * 60 * 60
 
     def storeAssociation(self, server_url, assoc=None):
-        stored_assoc = OpenIDStoreModel.objects.create(
+        OpenIDStoreModel.objects.create(
             server_url=server_url,
             handle=assoc.handle,
             secret=base64.encodestring(assoc.secret),
@@ -101,13 +99,13 @@ class OpenIDStore(OIDStore):
 
     def useNonce(self, server_url, timestamp, salt):
         try:
-            nonce = OpenIDNonce.objects.get(
+            OpenIDNonce.objects.get(
                 server_url=server_url,
                 timestamp=timestamp,
                 salt=salt
             )
         except OpenIDNonce.DoesNotExist:
-            nonce = OpenIDNonce.objects.create(
+            OpenIDNonce.objects.create(
                 server_url=server_url,
                 timestamp=timestamp,
                 salt=salt
@@ -272,6 +270,7 @@ class OAuthClient(object):
         """
         return HttpResponseRedirect(self._get_authorization_url())
 
+
 class OAuth(object):
     """
     Base class to perform oauth signed requests from access keys saved in a user's
@@ -319,6 +318,7 @@ class OAuth(object):
                 _('No access to private resources at "%s".') % get_token_prefix(self.request_token_url))
 
         return content
+
 
 class OAuthTwitter(OAuth):
     """
