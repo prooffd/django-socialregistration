@@ -1,8 +1,13 @@
+import django.dispatch
 from django.db import models
 
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
 from django.contrib.sites.models import Site
+
+
+user_setup_complete = django.dispatch.Signal(providing_args=['graph'])
+
 
 class FacebookProfile(models.Model):
     user = models.ForeignKey(User)
