@@ -1,5 +1,7 @@
 import uuid
 
+from openid.consumer.discover import DiscoveryFailure
+
 from django.conf import settings
 from django.template import RequestContext
 from django.core.urlresolvers import reverse
@@ -18,14 +20,15 @@ from django.contrib.auth import login, authenticate, logout as auth_logout
 from django.contrib.sites.models import Site
 
 from socialregistration.forms import UserForm
-from socialregistration.utils import (OAuthClient, OAuthTwitter,
-    OpenID, _https, DiscoveryFailure)
-from socialregistration.models import FacebookProfile, TwitterProfile, OpenIDProfile
+from socialregistration.utils import OAuthClient, OAuthTwitter, OpenID, _https
+from socialregistration.models import FacebookProfile, TwitterProfile, \
+    OpenIDProfile, user_setup_complete
 
 
 FB_ERROR = _('We couldn\'t validate your Facebook credentials')
 
 GENERATE_USERNAME = bool(getattr(settings, 'SOCIALREGISTRATION_GENERATE_USERNAME', False))
+
 
 def _get_next(request):
     """
@@ -42,11 +45,14 @@ def _get_next(request):
     else:
         return getattr(settings, 'LOGIN_REDIRECT_URL', '/')
 
+
 def setup(request, template='socialregistration/setup.html',
-    form_class=UserForm, extra_context=dict()):
+        form_class=UserForm, extra_context=None):
     """
     Setup view to create a username & set email address after authentication
     """
+    extra_context = extra_context or {}
+
     try:
         social_user = request.session['socialregistration_user']
         social_profile = request.session['socialregistration_profile']
@@ -60,9 +66,12 @@ def setup(request, template='socialregistration/setup.html',
             form = form_class(social_user, social_profile)
         else:
             form = form_class(social_user, social_profile, request.POST)
-            
+
             if form.is_valid():
                 form.save(request=request)
+                if type(social_profile) == FacebookProfile:
+                    user_setup_complete.send(sender=social_profile, graph=request.facebook.graph)
+
                 user = form.profile.authenticate()
                 login(request, user)
 
@@ -75,7 +84,7 @@ def setup(request, template='socialregistration/setup.html',
 
         return render_to_response(template, extra_context,
             context_instance=RequestContext(request))
-        
+
     else:
         # Generate user and profile
         social_user.username = str(uuid.uuid4())[:30]
@@ -93,27 +102,55 @@ def setup(request, template='socialregistration/setup.html',
         if 'socialregistration_profile' in request.session: del request.session['socialregistration_profile']
         return HttpResponseRedirect(_get_next(request))
 
+
 if has_csrf:
     setup = csrf_protect(setup)
 
+
+def setup_user(request, user, profile):
+    prefill = getattr(settings, 'FACEBOOK_USER_PREFILL', [])
+    if not prefill:
+        return user
+
+    if type(profile) == FacebookProfile:
+        fb_user = request.facebook.graph.get_object('me')
+        if 'email' in prefill:
+            user.email = fb_user['email']
+        if 'name' in prefill:
+            user.name_first = fb_user['name_first']
+            user.name_last = fb_user['name_last']
+    return user
+
+
 def facebook_login(request, template='socialregistration/facebook.html',
-    extra_context=dict(), account_inactive_template='socialregistration/account_inactive.html'):
+        extra_context=None, account_inactive_template='socialregistration/account_inactive.html'):
     """
     View to handle the Facebook login
     """
-    
+    extra_context = extra_context or {}
+
     if request.facebook.uid is None:
         extra_context.update(dict(error=FB_ERROR))
         return render_to_response(template, extra_context,
             context_instance=RequestContext(request))
 
     user = authenticate(uid=request.facebook.uid)
+    fb_data = request.facebook.graph.get_object('me')
+    fb_uid = request.facebook.uid
 
     if user is None:
-        request.session['socialregistration_user'] = User()
-        request.session['socialregistration_profile'] = FacebookProfile(uid=request.facebook.uid)
-        request.session['next'] = _get_next(request)
-        return HttpResponseRedirect(reverse('socialregistration_setup'))
+        try:
+            user = User.objects.get(email=fb_data['email'])
+            FacebookProfile.objects.create(uid=fb_uid, user=user)
+            user = authenticate(uid=fb_uid)
+        except User.DoesNotExist:
+            user = User()
+            profile = FacebookProfile(uid=request.facebook.uid)
+            user = setup_user(fb_data, user, profile)
+            request.session['socialregistration_user'] = user
+            request.session['socialregistration_profile'] = profile
+            request.session['next'] = _get_next(request)
+            return HttpResponseRedirect(reverse('socialregistration_setup'))
 
     if not user.is_active:
         return render_to_response(account_inactive_template, extra_context,
@@ -124,20 +161,24 @@ def facebook_login(request, template='socialregistration/facebook.html',
     return HttpResponseRedirect(_get_next(request))
 
 def facebook_connect(request, template='socialregistration/facebook.html',
-    extra_context=dict()):
+        extra_context=None):
     """
     View to handle connecting existing django accounts with facebook
     """
+    extra_context = extra_context or {}
+
     if request.facebook.uid is None or request.user.is_authenticated() is False:
         extra_context.update(dict(error=FB_ERROR))
         return render_to_response(template, extra_context,
             context_instance=RequestContext(request))
-    
+
     try:
-        profile = FacebookProfile.objects.get(uid=request.facebook.uid)
+        FacebookProfile.objects.get(uid=request.facebook.uid)
     except FacebookProfile.DoesNotExist:
-        profile = FacebookProfile.objects.create(user=request.user,
-            uid=request.facebook.uid)
+        FacebookProfile.objects.create(
+            user=request.user,
+            uid=request.facebook.uid
+        )
 
     return HttpResponseRedirect(_get_next(request))
 
@@ -155,11 +196,12 @@ def logout(request, redirect_url=None):
     return HttpResponseRedirect(url)
 
 def twitter(request, account_inactive_template='socialregistration/account_inactive.html',
-    extra_context=dict()):
+        extra_context=None):
     """
     Actually setup/login an account relating to a twitter user after the oauth
     process is finished successfully
     """
+
     client = OAuthTwitter(
         request, settings.TWITTER_CONSUMER_KEY,
         settings.TWITTER_CONSUMER_SECRET_KEY,
@@ -199,8 +241,8 @@ def twitter(request, account_inactive_template='socialregistration/account_inact
     return HttpResponseRedirect(_get_next(request))
 
 def oauth_redirect(request, consumer_key=None, secret_key=None,
-    request_token_url=None, access_token_url=None, authorization_url=None,
-    callback_url=None, parameters=None):
+        request_token_url=None, access_token_url=None, authorization_url=None,
+        callback_url=None, parameters=None):
     """
     View to handle the OAuth based authentication redirect to the service provider
     """
@@ -210,9 +252,9 @@ def oauth_redirect(request, consumer_key=None, secret_key=None,
     return client.get_redirect()
 
 def oauth_callback(request, consumer_key=None, secret_key=None,
-    request_token_url=None, access_token_url=None, authorization_url=None,
-    callback_url=None, template='socialregistration/oauthcallback.html',
-    extra_context=dict(), parameters=None):
+        request_token_url=None, access_token_url=None, authorization_url=None,
+        callback_url=None, template='socialregistration/oauthcallback.html',
+        extra_context=None, parameters=None):
     """
     View to handle final steps of OAuth based authentication where the user
     gets redirected back to from the service provider
@@ -220,6 +262,7 @@ def oauth_callback(request, consumer_key=None, secret_key=None,
     client = OAuthClient(request, consumer_key, secret_key, request_token_url,
         access_token_url, authorization_url, callback_url, parameters)
 
+    extra_context = extra_context or {}
     extra_context.update(dict(oauth_client=client))
 
     if not client.is_valid():
@@ -229,6 +272,7 @@ def oauth_callback(request, consumer_key=None, secret_key=None,
 
     # We're redirecting to the setup view for this oauth service
     return HttpResponseRedirect(reverse(client.callback_url))
+
 
 def openid_redirect(request):
     """
@@ -252,11 +296,15 @@ def openid_redirect(request):
         request.session['openid_error'] = True
         return HttpResponseRedirect(settings.LOGIN_URL)
 
+
 def openid_callback(request, template='socialregistration/openid.html',
-    extra_context=dict(), account_inactive_template='socialregistration/account_inactive.html'):
+        extra_context=None, account_inactive_template='socialregistration/account_inactive.html'):
     """
     Catches the user when he's redirected back from the provider to our site
     """
+
+    extra_context = extra_context or {}
+
     client = OpenID(
         request,
         'http%s://%s%s' % (
@@ -282,9 +330,7 @@ def openid_callback(request, template='socialregistration/openid.html',
         user = authenticate(identity=identity)
         if user is None:
             request.session['socialregistration_user'] = User()
-            request.session['socialregistration_profile'] = OpenIDProfile(
-                identity=identity
-            )
+            request.session['socialregistration_profile'] = OpenIDProfile(identity=identity)
             return HttpResponseRedirect(reverse('socialregistration_setup'))
 
         if not user.is_active:
@@ -297,8 +343,5 @@ def openid_callback(request, template='socialregistration/openid.html',
         login(request, user)
         return HttpResponseRedirect(_get_next(request))
 
-    return render_to_response(
-        template,
-        dict(),
-        context_instance=RequestContext(request)
-    )
+    return render_to_response(template, {},
+        context_instance=RequestContext(request))
