@@ -140,11 +140,15 @@ def facebook_login(request, template='socialregistration/facebook.html',
 
     if user is None:
         try:
+            if 'email' not in fb_data:
+                raise User.DoesNotExist;
             user = User.objects.get(email=fb_data['email'])
             FacebookProfile.objects.create(uid=fb_uid, user=user)
             user = authenticate(uid=fb_uid)
         except User.DoesNotExist:
             user = User()
+            if 'email' in fb_data:
+                user.email = fb_data['email']
             profile = FacebookProfile(uid=request.facebook.uid)
             user = setup_user(fb_data, user, profile)
             request.session['socialregistration_user'] = user
