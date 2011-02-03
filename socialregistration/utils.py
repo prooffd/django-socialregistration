@@ -208,7 +208,7 @@ class OAuthClient(object):
                     ('oauth_callback', 'http://%s%s' % (Site.objects.get_current(),
                         reverse(self.callback_url))),
                 ])
-                request_token_url = '%s?%s' % (self.request_token_url, params)
+                request_token_url = '%s?%s' % (self.request_token_url, urllib.quote(params))
             else:
                 request_token_url = self.request_token_url
             response, content = self.client.request(request_token_url, "GET")

@@ -4,9 +4,13 @@
 {% endcomment %}
 
 <form class="connect-button" name="login" method="post" action="{% if logged_in %}{% url facebook_connect %}{% else %}{% url facebook_login %}{% endif %}">
-{% social_csrf_token %}
-{% if next %}
-    <input type="hidden" name="next" value="{{ next }}" />
-{% endif %}
-<input type="image" onclick="facebookConnect(this.form);return false;" src="http://static.ak.fbcdn.net/images/fbconnect/login-buttons/connect_light_large_long.gif" />
+    {% social_csrf_token %}
+    {% if next %}
+        <input type="hidden" name="next" value="{{ next }}" />
+    {% endif %}
+    <div id="facebook">
+    
+        <a title="facebook" href="#" style="background: #FFF url(/static/images/facebook.gif) no-repeat center center" class="openid_large_btn"  onclick="facebookConnect(this.form);return false;"></a>
+    
+    </div>
 </form>
