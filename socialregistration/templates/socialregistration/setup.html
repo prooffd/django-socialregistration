@@ -1,15 +1,27 @@
+{% extends "registration/registration_base.html" %}
 {% load socialregistration_tags %}
-<h1>Setup</h1>
 
-{% if error %}
+{% block title %} Complete account setup{% endblock %}
+{% load uni_form_tags %}
+
+{% block body %}
+<div class="login_header">
+    Complete account setup
+</div>
+<div class="form">
+    {% if error %}
 	<p>Your session timed out. Please try again.</p>
-{% else %}
-	<form action="." method="post">
-	    <table>
-	        {{ form }}
-	    </table>
+    {% else %}
+	<form action="." method="post" class="uniForm">
+
+	    {{ form|as_uni_form }}
+
 	    {% social_csrf_token %}
-	    <input type="submit" value="save" />
+	    <div class="button_wrapper">
+		<input type="submit" value="save" class="button" />
+	    </div>
 	</form>
-{% endif %}
+    {% endif %}
+</div>
+{% endblock %}
 
